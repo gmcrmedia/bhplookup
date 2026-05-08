@@ -49,18 +49,18 @@ module.exports = async (req, res) => {
   try {
     const searchData = await callAnthropic([{
       role: 'user',
-      content: `Search for UK vehicle registration ${reg} and find its BHP, make, model, year and fuel type. Use rapidcarcheck.co.uk, totalcarcheck.co.uk or checkcardetails.co.uk.`
+      content: `What is the BHP of the UK car with number plate ${reg}? Search for "${reg} car BHP" and report back the make, model, year, fuel type and BHP.`
     }], [{ type: 'web_search_20250305', name: 'web_search' }]);
 
     const searchResult = extractText(searchData);
 
     if (!searchResult) {
-      return res.status(404).json({ success: false, error: 'No search results returned.', reg });
+      return res.status(404).json({ success: false, error: 'No results returned.', reg });
     }
 
     const extractData = await callAnthropic([{
       role: 'user',
-      content: `From this vehicle information, extract the data as JSON only. No explanation, no markdown, just the raw JSON object.\n\nVehicle info:\n${searchResult}\n\nRequired JSON format (use null if unknown):\n{"make":"Ford","model":"Focus","year":"2019","bhp":"150","fuel":"Petrol","found":true}\n\nIf no BHP was found:\n{"found":false,"reason":"why not found"}`
+      content: `Extract vehicle data from the text below into a JSON object. Reply with ONLY the raw JSON, no markdown, no explanation.\n\nText: ${searchResult}\n\nJSON format:\n{"make":"Ford","model":"Focus","year":"2019","bhp":"150","fuel":"Petrol","found":true}\n\nIf BHP is not in the text:\n{"found":false,"reason":"explain why"}`
     }]);
 
     let jsonText = extractText(extractData).replace(/```json|```/g, '').trim();
@@ -74,9 +74,17 @@ module.exports = async (req, res) => {
     }
 
     const name = [result.year, result.make, result.model].filter(Boolean).join(' ');
-    const speakText = `${name}, ${result.bhp} brake horsepower${result.fuel ? ', ' + result.fuel : ''}.`;
+    const speakText = `${name}, ${result.bhp} brake horsepower${result.fuel ? ', ' + result.fuel.toLowerCase() : ''}.`;
 
-    return res.status(200).json({ success: true, reg, bhp: result.bhp, make: result.make || null, model: result.model || null, year: result.year || null, fuel: result.fuel || null, speakText });
+    return res.status(200).json({
+      success: true, reg,
+      bhp: result.bhp,
+      make: result.make || null,
+      model: result.model || null,
+      year: result.year || null,
+      fuel: result.fuel || null,
+      speakText
+    });
 
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message, reg });
