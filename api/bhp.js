@@ -19,49 +19,75 @@ module.exports = async (req, res) => {
     return res.status(400).json({ success: false, error: 'Please provide a valid UK registration plate.' });
   }
 
+  // --- debug: confirm env vars are present ---
+  const hasKey = !!process.env.ANTHROPIC_API_KEY;
+  const keyPrefix = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.substring(0, 7) : 'MISSING';
+
   try {
-    // Step 1: Get basic DVLA data (£0.02)
-    const dvlaRes = await fetch(`https://api.checkcardetails.co.uk/vehicledata/vehicleregistration?v=${reg}`, {
-      headers: { 'Authorization': `Bearer ${process.env.CCD_API_KEY}` }
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{
+          role: 'user',
+          content: `Search for the BHP of UK registered vehicle with number plate ${reg}. Look on sites like rapidcarcheck.co.uk, totalcarcheck.co.uk or checkcardetails.co.uk.
+
+Return ONLY a JSON object, no other text, no markdown:
+{"make":"Ford","model":"Focus","year":"2019","bhp":"150","fuel":"Petrol","found":true}
+
+If BHP cannot be found return:
+{"found":false,"reason":"brief reason"}`
+        }]
+      })
     });
-    const dvlaData = await dvlaRes.json();
 
-    if (!dvlaRes.ok || dvlaData.error) {
-      return res.status(404).json({ success: false, error: `Vehicle not found: ${reg}`, reg });
-    }
+    const raw = await response.text();
 
-    // Step 2: Get spec data including BHP (£0.04)
-    const specRes = await fetch(`https://api.checkcardetails.co.uk/vehicledata/vehiclespecdata?v=${reg}`, {
-      headers: { 'Authorization': `Bearer ${process.env.CCD_API_KEY}` }
-    });
-    const specData = await specRes.json();
-
-    const make = dvlaData.make || '';
-    const model = dvlaData.model || '';
-    const year = dvlaData.yearOfManufacture || '';
-    const fuel = dvlaData.fuelType || '';
-    const bhp = specData.bhp || specData.powerBhp || specData.power_bhp || null;
-    const engine = specData.engineSize || specData.engineCapacity
-      ? `${(specData.engineSize || specData.engineCapacity / 1000).toFixed(1)}L`
-      : null;
-
-    if (!bhp) {
-      return res.status(404).json({
+    if (!response.ok) {
+      return res.status(500).json({
         success: false,
-        error: `Found the vehicle (${year} ${make} ${model}) but BHP data is unavailable.`,
-        reg, make, model, year, fuel
+        error: 'Anthropic API error',
+        status: response.status,
+        raw: raw.substring(0, 500),
+        hasKey,
+        keyPrefix,
+        reg
       });
     }
 
-    const vehicleName = [make, model].filter(Boolean).join(' ') || 'Vehicle';
-    const speakText = `${year ? year + ' ' : ''}${vehicleName}, ${bhp} brake horsepower${fuel ? ', ' + fuel.toLowerCase() : ''}.`;
+    const data = JSON.parse(raw);
 
-    return res.status(200).json({
-      success: true,
-      reg, bhp, make, model, year, fuel, engine, speakText
-    });
+    let jsonText = '';
+    for (const block of data.content) {
+      if (block.type === 'text' && block.text.trim()) {
+        jsonText = block.text.replace(/```json|```/g, '').trim();
+        break;
+      }
+    }
+
+    if (!jsonText) {
+      return res.status(500).json({ success: false, error: 'No text in AI response', contentTypes: data.content.map(b => b.type), reg });
+    }
+
+    const result = JSON.parse(jsonText);
+
+    if (!result.found) {
+      return res.status(404).json({ success: false, error: result.reason || `Could not find BHP for ${reg}.`, reg });
+    }
+
+    const name = [result.year, result.make, result.model].filter(Boolean).join(' ');
+    const speakText = `${name}, ${result.bhp} brake horsepower${result.fuel ? ', ' + result.fuel : ''}.`;
+
+    return res.status(200).json({ success: true, reg, bhp: result.bhp, make: result.make || null, model: result.model || null, year: result.year || null, fuel: result.fuel || null, speakText });
 
   } catch (err) {
-    return res.status(500).json({ success: false, error: `Server error: ${err.message}`, reg });
+    return res.status(500).json({ success: false, error: err.message, stack: err.stack.substring(0, 300), hasKey, keyPrefix, reg });
   }
 };
