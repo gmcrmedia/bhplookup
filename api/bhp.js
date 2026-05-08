@@ -47,7 +47,6 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Step 1: search for the vehicle info
     const searchData = await callAnthropic([{
       role: 'user',
       content: `Search for UK vehicle registration ${reg} and find its BHP, make, model, year and fuel type. Use rapidcarcheck.co.uk, totalcarcheck.co.uk or checkcardetails.co.uk.`
@@ -59,24 +58,12 @@ module.exports = async (req, res) => {
       return res.status(404).json({ success: false, error: 'No search results returned.', reg });
     }
 
-    // Step 2: extract structured data from the search result
     const extractData = await callAnthropic([{
       role: 'user',
-      content: `From this vehicle information, extract the data as JSON only. No explanation, no markdown, just the raw JSON object.
-
-Vehicle info:
-${searchResult}
-
-Required JSON format (use null if unknown):
-{"make":"Ford","model":"Focus","year":"2019","bhp":"150","fuel":"Petrol","found":true}
-
-If no BHP was found:
-{"found":false,"reason":"why not found"}`
+      content: `From this vehicle information, extract the data as JSON only. No explanation, no markdown, just the raw JSON object.\n\nVehicle info:\n${searchResult}\n\nRequired JSON format (use null if unknown):\n{"make":"Ford","model":"Focus","year":"2019","bhp":"150","fuel":"Petrol","found":true}\n\nIf no BHP was found:\n{"found":false,"reason":"why not found"}`
     }]);
 
     let jsonText = extractText(extractData).replace(/```json|```/g, '').trim();
-
-    // try to pull JSON out if surrounded by text
     const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
     if (jsonMatch) jsonText = jsonMatch[0];
 
@@ -89,15 +76,7 @@ If no BHP was found:
     const name = [result.year, result.make, result.model].filter(Boolean).join(' ');
     const speakText = `${name}, ${result.bhp} brake horsepower${result.fuel ? ', ' + result.fuel : ''}.`;
 
-    return res.status(200).json({
-      success: true, reg,
-      bhp: result.bhp,
-      make: result.make || null,
-      model: result.model || null,
-      year: result.year || null,
-      fuel: result.fuel || null,
-      speakText
-    });
+    return res.status(200).json({ success: true, reg, bhp: result.bhp, make: result.make || null, model: result.model || null, year: result.year || null, fuel: result.fuel || null, speakText });
 
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message, reg });
