@@ -4,6 +4,6 @@
   "description": "UK vehicle BHP lookup API for iOS Siri Shortcut",
   "private": true,
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   }
 }
